@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>محلل الصور - Teachable Machine</title>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@latest/dist/tf.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@teachablemachine/image@latest/dist/teachablemachine-image.min.js"></script>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            margin: 0;
+            background-color: #e9f0f9;
+            color: #333;
+        }
+        h1 {
+            color: #2c3e50;
+            margin-bottom: 30px;
+        }
+        #image-container {
+            margin-top: 20px;
+            border: 2px dashed #a0c4ff;
+            padding: 25px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            width: 320px;
+            height: 320px;
+            text-align: center;
+            background-color: #ffffff;
+            border-radius: 12px;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+            position: relative; /* لإظهار النص فوق الصورة */
+        }
+        #uploaded-image {
+            max-width: 100%;
+            max-height: 100%;
+            border-radius: 8px;
+            display: none; /* مخفي افتراضياً */
+            object-fit: contain; /* للحفاظ على نسبة العرض إلى الارتفاع */
+        }
+        #upload-placeholder {
+            position: absolute;
+            color: #666;
+            font-size: 1.1em;
+            text-align: center;
+            pointer-events: none; /* للسماح بالنقر على ما تحت النص */
+        }
+        input[type="file"] {
+            margin-top: 25px;
+            padding: 10px 15px;
+            border: 1px solid #c0d9ed;
+            border-radius: 6px;
+            background-color: #f7faff;
+            cursor: pointer;
+            font-size: 0.95em;
+        }
+        input[type="file"]::-webkit-file-upload-button {
+            background-color: #007bff;
+            color: white;
+            padding: 8px 15px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            margin-right: 10px;
+            transition: background-color 0.3s ease;
+        }
+        input[type="file"]::-webkit-file-upload-button:hover {
+            background-color: #0056b3;
+        }
+        button {
+            padding: 12px 25px;
+            font-size: 1.1em;
+            background-color: #28a745;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            margin-top: 30px;
+            box-shadow: 0 4px 10px rgba(40, 167, 69, 0.3);
+            transition: background-color 0.3s ease, transform 0.2s ease;
+        }
+        button:hover {
+            background-color: #218838;
+            transform: translateY(-2px);
+        }
+        #label-container {
+            margin-top: 30px;
+            width: 80%;
+            max-width: 400px;
+            background-color: #ffffff;
+            border-radius: 12px;
+            padding: 20px;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+            font-size: 1.1em;
+            text-align: center;
+            min-height: 50px; /* لضمان المساحة حتى لو لم يكن هناك نص */
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+        }
+        #label-container div {
+            margin: 5px 0;
+            padding: 8px 15px;
+            background-color: #e6f0ff;
+            border-radius: 6px;
+            width: calc(100% - 30px);
+            text-align: left;
+            color: #34495e;
+            box-shadow: inset 0 1px 3px rgba(0,0,0,0.05);
+        }
+        #label-container div:nth-child(odd) {
+            background-color: #dbeaff; /* لون مختلف لتمييز الفئات */
+        }
+    </style>
+</head>
+<body>
+    <h1>محلل الصور الذكي</h1>
+
+    <div id="image-container">
+        <img id="uploaded-image" src="#" alt="الصورة المحملة للتحليل">
+        <p id="upload-placeholder">اضغط هنا لتحميل صورة أو اسحبها هنا</p>
+    </div>
+    <input type="file" id="image-upload" accept="image/*">
+    <button type="button" onclick="predictImage()">تحليل الصورة</button>
+    <div id="label-container">
+        <p>النتائج ستظهر هنا بعد التحليل</p>
+    </div>
+
+    <script type="text/javascript">
+        // **هنا ضع مسار مجلد النموذج الخاص بك.**
+        // إذا قمت بتنزيل النموذج، يجب أن يكون مجلد 'my_model' موجوداً بجانب هذا الملف.
+        const URL = "./my_model/";
+        // إذا رفعت نموذجك إلى Teachable Machine Cloud، استبدل المسار بالرابط الذي حصلت عليه:
+        // const URL = "https://teachablemachine.withgoogle.com/models/YOUR_MODEL_ID/";
+
+        let model, maxPredictions;
+        const uploadedImage = document.getElementById("uploaded-image");
+        const uploadPlaceholder = document.getElementById("upload-placeholder");
+        const labelContainer = document.getElementById("label-container");
+        const imageUploadInput = document.getElementById("image-upload");
+        const imageContainer = document.getElementById("image-container"); // للحصول على عنصر الحاوية
+
+        // --- تحميل النموذج ---
+        async function loadModel() {
+            const modelURL = URL + "model.json";
+            const metadataURL = URL + "metadata.json";
+
+            labelContainer.innerHTML = "<p>جاري تحميل النموذج، يرجى الانتظار...</p>";
+            try {
+                model = await tmImage.load(modelURL, metadataURL);
+                maxPredictions = model.getTotalClasses();
+                console.log("تم تحميل النموذج بنجاح!");
+                labelContainer.innerHTML = "<p>تم تحميل النموذج. اختر صورة للتحليل.</p>";
+            } catch (error) {
+                console.error("خطأ في تحميل النموذج:", error);
+                labelContainer.innerHTML = "<p style='color: red;'>خطأ في تحميل النموذج. تأكد من صحة المسار أو رابط النموذج.</p>";
+            }
+        }
+
+        // --- معالجة اختيار ملف الصورة ---
+        imageUploadInput.addEventListener("change", function(event) {
+            if (event.target.files && event.target.files[0]) {
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    uploadedImage.src = e.target.result;
+                    uploadedImage.style.display = "block"; // إظهار الصورة
+                    uploadPlaceholder.style.display = "none"; // إخفاء العنصر النائب
+                    labelContainer.innerHTML = "<p>الصورة جاهزة للتحليل.</p>";
+                };
+                reader.readAsDataURL(event.target.files[0]);
+            }
+        });
+
+        // --- معالجة السحب والإفلات (اختياري) ---
+        imageContainer.addEventListener("dragover", (event) => {
+            event.preventDefault(); // منع السلوك الافتراضي لفتح الملف
+            imageContainer.style.borderColor = "#6a90ff"; // تغيير لون الحدود عند السحب فوقها
+        });
+
+        imageContainer.addEventListener("dragleave", () => {
+            imageContainer.style.borderColor = "#a0c4ff"; // استعادة اللون عند المغادرة
+        });
+
+        imageContainer.addEventListener("drop", (event) => {
+            event.preventDefault();
+            imageContainer.style.borderColor = "#a0c4ff"; // استعادة اللون بعد الإفلات
+
+            const files = event.dataTransfer.files;
+            if (files.length > 0 && files[0].type.startsWith('image/')) {
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    uploadedImage.src = e.target.result;
+                    uploadedImage.style.display = "block";
+                    uploadPlaceholder.style.display = "none";
+                    labelContainer.innerHTML = "<p>الصورة جاهزة للتحليل.</p>";
+                };
+                reader.readAsDataURL(files[0]);
+            } else {
+                alert("يرجى إسقاط ملف صورة صالح.");
+            }
+        });
+
+        // --- وظيفة التوقع (التحليل) ---
+        async function predictImage() {
+            if (!model) {
+                labelContainer.innerHTML = "<p style='color: orange;'>النموذج لم يتم تحميله بعد. يرجى الانتظار أو تحديث الصفحة.</p>";
+                return;
+            }
+            if (uploadedImage.style.display === "none" || !uploadedImage.src || uploadedImage.src.startsWith('data:,')) {
+                labelContainer.innerHTML = "<p style='color: orange;'>الرجاء تحميل صورة أولاً للتحليل.</p>";
+                return;
+            }
+
+            labelContainer.innerHTML = "<p>جاري تحليل الصورة، يرجى الانتظار...</p>";
+
+            try {
+                const prediction = await model.predict(uploadedImage);
+
+                // مسح التوقعات القديمة وتهيئتها
+                labelContainer.innerHTML = '';
+                for (let i = 0; i < maxPredictions; i++) {
+                    const classPrediction =
+                        prediction[i].className + ": " + (prediction[i].probability * 100).toFixed(2) + "%"; // عرض كنسبة مئوية
+                    const predictionDiv = document.createElement("div");
+                    predictionDiv.innerHTML = classPrediction;
+                    labelContainer.appendChild(predictionDiv);
+                }
+            } catch (error) {
+                console.error("خطأ أثناء التوقع:", error);
+                labelContainer.innerHTML = "<p style='color: red;'>حدث خطأ أثناء تحليل الصورة. يرجى المحاولة مرة أخرى.</p>";
+            }
+        }
+
+        // --- بدء تحميل النموذج عند تحميل الصفحة ---
+        window.onload = loadModel;
+    </script>
+</body>
+</html>
